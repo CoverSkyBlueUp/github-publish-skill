@@ -2,11 +2,11 @@
 name: github-publish
 license: MIT
 description:
-  将本地目录/仓库发布到 GitHub 的可复用工作流（v2：token 安全保存自动复用、一键发布脚本、发布前脱敏扫描）。
+  将本地目录/仓库发布到 GitHub 的可复用工作流（v2.1：token 安全保存自动复用且永不明文进出对话/命令行、一键发布脚本、发布前脱敏扫描）。
   触发场景：用户要求把某目录/项目/脚本发布/上传到 GitHub、部署到 GitHub 仓库、重装后重新发布、或分享代码到开源平台。
 metadata:
   author: CoverSkyBlueUp
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # github-publish Skill
@@ -38,8 +38,9 @@ publish.ps1 自动调用另外两者的能力（token 读取、脱敏预检）�
 ```powershell
 $s = "C:\Users\<用户名>\.dsh\skills\github-publish\scripts"
 
-# 1) 保存 token（只需一次，DPAPI 加密；-Username 可省略，自动从 API 获取）
-powershell -NoProfile -ExecutionPolicy Bypass -File "$s\gh-token.ps1" -Action Store -Token <ghp_...>
+# 1) 保存 token（只需一次；【推荐】-Prompt 交互输入，不回显、不进历史、不进对话）
+powershell -NoProfile -ExecutionPolicy Bypass -File "$s\gh-token.ps1" -Action Store -Prompt
+#    备选安全通道：-TokenFile <路径>（用后删除文件）或先设环境变量 GH_PUBLISH_TOKEN
 
 # 2) 准备仓库目录 + 脱敏扫描（可加 -Patterns 追加真实敏感串/机器路径）
 powershell -NoProfile -ExecutionPolicy Bypass -File "$s\sanitize.ps1" -Path "D:\path\to\repo"
@@ -52,23 +53,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$s\publish.ps1" -RepoPath "
 
 **目标：token 只输入一次，之后所有发布会话自动复用，无需再次向用户索要。**
 
+> ### 🔴 token 安全红线（v2.1）
+> - **绝不在 DSH 对话中要求用户粘贴原始 token**，也不把 token 写进任何命令/日志/输出——对话中只出现掩码（`ghp_xxxx...`）。
+> - 需要保存/更新 token 时，让**用户在本机终端**执行 `gh-token.ps1 -Action Store -Prompt`（Read-Host 不回显、不进 PSReadLine 历史、不进进程命令行），完成后只回报掩码确认。
+> - 备用通道：`-TokenFile <路径>`（token 写入临时文件，脚本读取后用后删除）；或环境变量 `GH_PUBLISH_TOKEN`（设置后 `-Action Store` 自动读取）。
+> - **禁止**把 token 作为 `-Token` 参数在 DSH 会话中传递（会明文留在对话/日志/进程命令行）。`-Token` 仅限用户本机终端自用时可用，且脚本会告警提示轮换。
+> - token 疑似经任何通道泄露 → GitHub 撤销 → `-Action Remove` → 用 `-Prompt` 重新 Store。
+
 - **存储位置**：`%APPDATA%\DSH\github\token.bin`（DPAPI `ProtectedData` 加密，仅当前 Windows 用户可解密，不落明文）
 - **元数据**：`meta.json`（用户名、保存时间、token 掩码），供 publish.ps1 推导 `-Username`
 - **命令**（`gh-token.ps1`）：
   | Action | 作用 |
   |--------|------|
-  | `Store -Token <ghp_...> [-Username u] [-Force]` | 校验 token 并加密保存（覆盖需 -Force） |
-  | `Get [-Raw]` | 查看掩码信息；`-Raw` 输出原始 token（勿在日志展示） |
+  | `Store -Prompt` | 【推荐】交互式输入并加密保存（不回显、不进历史） |
+  | `Store -TokenFile <路径>` | 从文件读取并加密保存（用后删除文件） |
+  | `Store`（配合 `GH_PUBLISH_TOKEN`） | 从环境变量读取并加密保存 |
+  | `Store -Token <ghp_...> [-Username u] [-Force]` | 直接传参（仅限本机终端，会告警建议轮换） |
+  | `Get [-Raw]` | 查看掩码信息；`-Raw` 输出原始 token（仅供脚本管道，勿展示） |
   | `Check` | 状态检查（未保存退出码 1） |
   | `Validate` | 调 GitHub API 校验已存 token 是否有效 |
   | `Remove` | 删除已存 token |
 - **git 层免认证**：publish.ps1 推送后会用 `git credential approve` 写入凭据，
-  之后普通 `git clone/push` 也免认证。
+  之后普通 `git clone/push` 也免认证（凭据存于 Windows 凭据管理器，非明文文件）。
 - **安全**：
   - 仅当前 Windows 用户可解密（DPAPI 绑定用户 + 机器）
   - 不把 token 写入任何仓库文件 / git remote URL（push 后立即清理）
-  - token 疑似泄露 → GitHub 撤销 → `gh-token.ps1 -Action Remove` → 重新 `Store`
-  - 对话/日志中只显示掩码（`ghp_xxxx...`），不显示原始 token
+  - publish.ps1 保存 token 时**内联 DPAPI 写入**，不通过子进程/命令行透传明文
+  - token 疑似泄露 → GitHub 撤销 → `-Action Remove` → 重新 `Store`
 
 ## 四、完整流程（含 v1 踩坑）
 
@@ -173,6 +184,7 @@ Invoke-RestMethod -Uri "https://api.github.com/repos/<GITHUB_USERNAME>/<REPO>/co
 
 ## 版本记录
 
+- v2.1.0：**token 安全红线**——对话/命令行/日志永不明文；新增 `-Prompt`（交互不回显）与 `-TokenFile`/`GH_PUBLISH_TOKEN` 安全录入通道；publish.ps1 保存 token 改为内联 DPAPI（消除子进程命令行透传明文）。
 - v2.0.0：token DPAPI 安全保存与自动复用（gh-token.ps1）、发布前脱敏扫描（sanitize.ps1）、
   一键发布脚本重写（publish.ps1 自动读 token / 建仓库 / 推送 / 清理 / 写 git 凭据）、部署结构重组。
 - v1.0.0：初次封装基于实际发布会话（qq-remote-bridge 上传 GitHub）——认证类型坑、脱敏、沙箱提权、`git -C`、token 清理。

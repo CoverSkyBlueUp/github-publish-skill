@@ -53,17 +53,28 @@ GET https://api.github.com/repos/<USERNAME>/<REPO>/contents/
   **解法**：判断 remote 是否存在用 `git remote` 列表输出（空输出不产生错误）；push 前后临时 `$ErrorActionPreference = "Continue"` 再恢复，并检查 `$LASTEXITCODE`。
 - 免认证持久化：`"protocol=https`nhost=github.com`nusername=<USERNAME>`npassword=<TOKEN>`n" | git credential approve`
 
-## 6. token 安全存储与复用（v2）
+## 6. token 安全存储与复用（v2.1）
 
 - 存储位置：`%APPDATA%\DSH\github\token.bin`，**DPAPI（ProtectedData）加密**，仅当前 Windows 用户可解密
 - 元数据：同目录 `meta.json`（用户名 / 保存时间 / token 掩码）
 - 命令（`scripts/gh-token.ps1`）：
-  - `-Action Store -Token <ghp_...> [-Username u] [-Force]`：校验（GET /user）后加密保存
-  - `-Action Get [-Raw]`：查看掩码 / 取原始值（脚本管道用）
+  - **安全录入通道（推荐，v2.1）**：`-Action Store -Prompt`（Read-Host 不回显、不进 PSReadLine 历史）、
+    `-Action Store -TokenFile <路径>`（临时文件，用后删除）、设置环境变量 `GH_PUBLISH_TOKEN` 后 `-Action Store`
+  - `-Action Store -Token <ghp_...> [-Username u] [-Force]`：直接传参（**仅限本机终端**；会明文进终端历史/进程命令行，脚本会告警建议轮换）
+  - `-Action Get [-Raw]`：查看掩码 / 取原始值（脚本管道用，勿展示）
   - `-Action Validate`：API 校验有效性；`-Action Check`：状态；`-Action Remove`：删除
-- publish.ps1 不传 `-Token` 时自动读取该存储；`-SaveToken` 可把新 token 一并保存
+- publish.ps1 不传 `-Token` 时自动读取该存储；`-SaveToken` 可把新 token 一并保存（**内联 DPAPI 写入，不经子进程/命令行透传**）
 - DPAPI 要点：`Add-Type -AssemblyName System.Security` 后调用
   `[System.Security.Cryptography.ProtectedData]::Protect/Unprotect($bytes, $null, CurrentUser)`
+
+### 🔴 v2.1 安全红线（实测教训）
+
+- token 一旦以 `-Token` 参数或对话粘贴形式出现，会明文留在：DSH 会话日志、pwsh 命令记录、进程命令行
+  （`Get-CimInstance Win32_Process` 可见）、PSReadLine 历史（`ConsoleHost_history.txt`）。
+- **流程规定**：DSH 会话内一律不要求/不出现原始 token——让用户在本机终端跑 `-Prompt` 保存，只回报掩码；
+  若历史中已残留，删除历史文件或整行，并到 GitHub 撤销该 token 后重新 Store。
+- 进程命令行泄露示例（避免）：`powershell -File gh-token.ps1 -Action Store -Token ghp_xxx`（明文可见）。
+  正确做法：`-Prompt` / `-TokenFile` / 环境变量。
 
 ## 7. 脱敏要点
 
@@ -88,5 +99,6 @@ GET https://api.github.com/repos/<USERNAME>/<REPO>/contents/
 
 ## 10. 发布记录（github-publish 技能仓库）
 
-- 仓库：https://github.com/CoverSkyBlueUp/github-publish-skill（v2.0.0 结构：SKILL.md + scripts/{gh-token,sanitize,publish}.ps1 + references）
+- 仓库：https://github.com/CoverSkyBlueUp/github-publish-skill（v2.1 结构：SKILL.md + scripts/{gh-token,sanitize,publish}.ps1 + references + README 部署说明）
 - 实操流程：`gh-token.ps1 -Action Store`（保存一次）→ `sanitize.ps1`（脱敏扫描）→ `publish.ps1`（自动复用 token 发布）
+- v2.1：消除明文 token 进出对话/命令行（-Prompt/-TokenFile/环境变量通道 + publish 内联保存）

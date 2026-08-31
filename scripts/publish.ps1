@@ -53,7 +53,7 @@ if ([string]::IsNullOrEmpty($Token)) {
   Step "未提供 -Token，读取已保存的 token ..."
   $Token = Get-StoredToken
   if ([string]::IsNullOrEmpty($Token)) {
-    Fail "没有已保存的 token。请先执行一次: gh-token.ps1 -Action Store -Token <ghp_...>`n或本命令加 -Token <ghp_...> -SaveToken 保存。"
+    Fail "没有已保存的 token。请在本机终端执行（避免明文进对话/命令行/历史）：gh-token.ps1 -Action Store -Prompt`n或设置环境变量 GH_PUBLISH_TOKEN 后重试。"
   }
   Step "已读取本地保存的 token（不显示原文）"
 }
@@ -72,10 +72,20 @@ if ([string]::IsNullOrEmpty($Username)) {
 if ([string]::IsNullOrEmpty($Username)) { Fail "无法确定 GitHub 用户名（-Username 或已保存的 meta.json）" }
 Step "将以 $Username 身份发布"
 
-# ---- 0.5) 可选：保存 token --------------------------------------------------
+# ---- 0.5) 可选：保存 token（内联 DPAPI，避免子进程命令行透传明文）-----------
 if ($SaveToken -and -not [string]::IsNullOrEmpty($Token)) {
   Step "保存 token 到本地安全存储（DPAPI）..."
-  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scriptDir "gh-token.ps1") -Action Store -Token $Token -Username $Username -Force | Out-Host
+  Add-Type -AssemblyName System.Security | Out-Null
+  $storeDir = Join-Path $env:APPDATA "DSH\github"
+  if (-not (Test-Path $storeDir)) { New-Item -ItemType Directory -Path $storeDir -Force | Out-Null }
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($Token)
+  $enc = [System.Security.Cryptography.ProtectedData]::Protect(
+    $bytes, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+  [System.IO.File]::WriteAllBytes((Join-Path $storeDir "token.bin"), $enc)
+  $mask = $Token.Substring(0, 4) + "..." + $Token.Substring($Token.Length - 4)
+  @{ username = $Username; storedAt = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"); tokenMask = $mask; valid = $true } |
+    ConvertTo-Json | Set-Content (Join-Path $storeDir "meta.json") -Encoding UTF8
+  Step "token 已保存（DPAPI 加密，下次发布自动复用）"
 }
 
 # ---- 1) 本地仓库准备 ---------------------------------------------------------
