@@ -49,6 +49,8 @@ GET https://api.github.com/repos/<USERNAME>/<REPO>/contents/
 - 认证（免交互）：`git remote add origin "https://<token>@github.com/<USERNAME>/<REPO>.git"`
 - push 后**必须** `git remote set-url origin "https://github.com/<USERNAME>/<REPO>.git"` 移除 token
 - `git push` 进度走 stderr，PowerShell 显示 `NativeCommandError` 是**假错误**，看 `* [new branch] main -> main` 即成功
+- **⚠️ PS 5.1 + `$ErrorActionPreference = "Stop"`**：原生 git 写 stderr（`remote get-url` 无此 remote 的报错、push 进度、CRLF 警告）会被升级为终止错误直接退出脚本（实测踩到）。
+  **解法**：判断 remote 是否存在用 `git remote` 列表输出（空输出不产生错误）；push 前后临时 `$ErrorActionPreference = "Continue"` 再恢复，并检查 `$LASTEXITCODE`。
 - 免认证持久化：`"protocol=https`nhost=github.com`nusername=<USERNAME>`npassword=<TOKEN>`n" | git credential approve`
 
 ## 6. token 安全存储与复用（v2）

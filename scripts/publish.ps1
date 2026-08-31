@@ -157,19 +157,31 @@ if (-not $exists) {
 # ---- 3) push + 写 git 凭据 + 清理 remote token --------------------------------
 Step "配置 remote 并推送"
 $tokenUrl = "https://$Token@github.com/$Username/$RepoName.git"
-if (& $git -C $RepoPath remote get-url origin 2>$null) { & $git -C $RepoPath remote set-url origin $tokenUrl }
+$origin = (& $git -C $RepoPath remote) 2>$null
+if ($origin -match '(?m)^origin\s*$') { & $git -C $RepoPath remote set-url origin $tokenUrl }
 else { & $git -C $RepoPath remote add origin $tokenUrl }
 
-& $git -C $RepoPath push -u origin main
+# push：git 进度走 stderr，PS 5.1 + EAP=Stop 会误判为终止错误，需临时降级 EAP
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& $git -C $RepoPath push -u origin main 2>&1 | ForEach-Object { if ($_ -is [System.Management.Automation.ErrorRecord]) { Write-Host $_.ToString() } else { Write-Host $_ } }
+$pushCode = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
+if ($pushCode -ne 0) { Fail "git push 失败（exit $pushCode）" }
+
 # push 成功后立即移除 remote 里的 token
 & $git -C $RepoPath remote set-url origin "https://github.com/$Username/$RepoName.git"
 Step "已从 remote URL 移除 token"
 
 # 写入 git credential store，后续 git 操作免认证（失败不影响发布）
 try {
-  "protocol=https`nhost=github.com`nusername=$Username`npassword=$Token`n" | & $git credential approve
+  $prevEap2 = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  "protocol=https`nhost=github.com`nusername=$Username`npassword=$Token`n" | & $git credential approve 2>$null
+  $ErrorActionPreference = $prevEap2
   Step "已写入 git credential store（后续 git clone/push 免认证）"
 } catch {
+  $ErrorActionPreference = $prevEap2
   Write-Host "[publish] 提示: 未写入 git 凭据（可忽略，发布功能不受影响）" -ForegroundColor DarkYellow
 }
 
