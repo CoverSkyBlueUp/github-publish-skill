@@ -1,7 +1,7 @@
 # github-publish — DSH 技能：一键发布到 GitHub（token 安全复用）
 
 一个可复用的 DSH（DeepSeek Harness）技能：把本地目录/仓库发布到 GitHub 的完整工作流。
-**v2.1 核心特性：token 只需保存一次，之后所有发布自动复用；token 永不明文进出对话/命令行/日志。**
+**v2.2 核心特性：token 只需保存一次，之后所有发布自动复用；首次配置时用户可二选一——「对话粘贴」或「外部命令导入」。**
 
 ## ✨ 特性
 
@@ -38,18 +38,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$dst\scripts\gh-token.ps1" 
 只需把仓库中的 **`SKILL.md`、`scripts/`、`references/`** 三个部分复制到 DSH 技能目录下的 `github-publish/` 文件夹即可。
 `README.md`、`LICENSE`、`.gitignore` 是仓库级文件，技能运行不需要。
 
-### 部署后首次配置（只需一次）
+### 部署后首次配置（只需一次，录入方式用户二选一）
 
 ```powershell
-# 【推荐】交互式输入：不回显、不进终端历史、不进命令行
+# 方式 B【推荐】外部命令导入：交互式输入，不回显、不进终端历史、不进命令行
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\skills\github-publish\scripts\gh-token.ps1" -Action Store -Prompt
-# 备选：-TokenFile <路径>（token 写入临时文件，脚本读取后用后删除）
-# 备选：先设置环境变量 $env:GH_PUBLISH_TOKEN 再运行 -Action Store
+# 方式 B 备选：-TokenFile <路径>（token 写入临时文件，脚本读取后用后删除）
+# 方式 B 备选：先设置环境变量 $env:GH_PUBLISH_TOKEN 再运行 -Action Store
+# 方式 A：对话粘贴——直接在 DSH 对话中把 token 粘贴给 Agent，由 Agent 调用
+#        gh-token.ps1 -Action Store -Token <token> 保存（保存后仅显示掩码，并提醒轮换）
 ```
 
 > ⚠️ 需要 **Classic PAT**（`ghp_` 开头，勾选 `repo` scope）；Fine-grained PAT（`github_pat_`）无法通过 API 创建新仓库（403）。
 >
-> 🔴 **安全红线**：请勿把 token 粘贴进 DSH 对话或作为 `-Token` 参数传递（会明文留在对话/日志/进程命令行）——token 只应经上述通道在本机输入。
+> 🔑 **录入方式由用户选择**（v2.2）：默认推荐方式 B（外部命令导入，最安全）；若用户主动选择方式 A（对话粘贴），允许，但须知晓 token 会留在 DSH 会话记录中，建议事后到 GitHub 撤销并重新录入。无论哪种方式，保存后对话中只显示掩码。
 >
 > 部署后重启/刷新 DSH 会话，技能目录中即出现 `github-publish`，可直接对话触发"发布到 GitHub"。
 
@@ -58,7 +60,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.dsh\skill
 ```powershell
 $s = "$env:USERPROFILE\.dsh\skills\github-publish\scripts"
 
-# 1) 保存 token（只需一次，部署后必做；-Prompt 交互输入，不落历史/对话）
+# 1) 保存 token（只需一次，部署后必做）——方式 A 对话粘贴，或方式 B 外部命令导入（推荐，不落历史/对话）：
 powershell -NoProfile -ExecutionPolicy Bypass -File "$s\gh-token.ps1" -Action Store -Prompt
 
 # 2) 脱敏扫描（发布前检查）
@@ -84,7 +86,7 @@ github-publish/
 ## 🔒 安全说明
 
 - token 经 DPAPI 加密，仅当前 Windows 用户可解密；删除用 `gh-token.ps1 -Action Remove`
-- 🔴 **token 永不明文进出对话**：保存/更新只用 `-Prompt`（交互不回显）、`-TokenFile` 或环境变量 `GH_PUBLISH_TOKEN`；不使用 `-Token` 传参，不粘贴进任何对话
+- 🔑 **录入方式用户二选一（v2.2）**：默认推荐外部命令导入（`-Prompt` 交互不回显 / `-TokenFile` / 环境变量 `GH_PUBLISH_TOKEN`）；用户选择对话粘贴时允许 `-Token` 传参保存，但会告警且 token 已留在会话记录，建议事后撤销轮换
 - push 后自动从 git remote URL 移除 token，token 永不进入仓库文件
 - 对话/日志/进程命令行只出现掩码（`ghp_xxxx...`），不出现原始 token
 - 发布前运行脱敏扫描，确认无真实密钥/机器专属路径泄露
